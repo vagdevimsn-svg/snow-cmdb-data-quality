@@ -9,7 +9,7 @@ A CSDM-style health check for a ServiceNow CMDB. It reads CIs and relationships 
 
 > **Portfolio project.** Independently written by Vagdevi Meka with synthetic data. It contains no employer or client code or data.
 
-![HTML report](docs/report_screenshot.png)
+![HTML report](docs/report_screenshot.jpg)
 
 ## Business problem
 
