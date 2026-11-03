@@ -1,20 +1,26 @@
 """Data sources: a JSON export on disk, or a live instance through the ServiceNow Table API.
 
-Credentials are read from environment variables only and are never logged.
+Credentials are read from environment variables only and are never logged. The client is
+read-only (GET), pages through results, and retries 429/5xx responses with backoff,
+honouring Retry-After when the instance sends it (ServiceNow rate-limit rules do).
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
 CI_TABLE = "cmdb_ci"
 REL_TABLE = "cmdb_rel_ci"
 CI_FIELDS = ("sys_id,name,sys_class_name,serial_number,ip_address,os,support_group,owned_by,"
-             "install_status,last_discovered,busines_criticality")
+             "it_application_owner,install_status,last_discovered,busines_criticality")
+RETRY_STATUS = {429, 500, 502, 503, 504}
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class SourceError(RuntimeError):
@@ -37,28 +43,58 @@ def load_file(path: str | Path) -> tuple[list[dict], list[dict]]:
 
 
 class TableApiSource:
-    """Minimal paginated reader for the ServiceNow Table API (read-only)."""
+    """Minimal paginated, read-only reader for the ServiceNow Table API."""
 
-    def __init__(self, instance_url: str, user: str, password: str, session=None, page_size: int = 500,
-                 timeout: int = 30):
-        if not instance_url.startswith("https://"):
-            raise SourceError("instance URL must use https")
+    def __init__(self, instance_url: str, user: str = "", password: str = "", token: str = "",
+                 session=None, page_size: int = 500, timeout: int = 30, max_retries: int = 3,
+                 backoff: float = 1.0, sleep=time.sleep, allow_insecure_http: bool = False):
+        parsed = urlparse(instance_url)
+        local_http = parsed.scheme == "http" and (parsed.hostname in LOCAL_HOSTS or allow_insecure_http)
+        if parsed.scheme != "https" and not local_http:
+            raise SourceError("instance URL must use https (plain http is allowed only for a local mock)")
+        if parsed.scheme == "http":
+            log.warning("using plain http to %s - only acceptable for the local mock server", parsed.hostname)
+        if not token and not (user and password):
+            raise SourceError("provide SN_TOKEN (OAuth bearer) or SN_USER and SN_PASSWORD")
         self.base = instance_url.rstrip("/")
-        self.page_size = page_size
-        self.timeout = timeout
+        self.page_size, self.timeout = page_size, timeout
+        self.max_retries, self.backoff, self._sleep = max_retries, backoff, sleep
         if session is None:
             import requests  # imported lazily so file mode has no dependency
             session = requests.Session()
         self.session = session
-        self.session.auth = (user, password)
         self.session.headers.update({"Accept": "application/json"})
+        if token:
+            self.session.headers["Authorization"] = f"Bearer {token}"
+        else:
+            self.session.auth = (user, password)
 
     @classmethod
-    def from_env(cls, **kw) -> "TableApiSource":
-        missing = [k for k in ("SN_INSTANCE_URL", "SN_USER", "SN_PASSWORD") if not os.environ.get(k)]
-        if missing:
-            raise SourceError("missing environment variables: " + ", ".join(missing))
-        return cls(os.environ["SN_INSTANCE_URL"], os.environ["SN_USER"], os.environ["SN_PASSWORD"], **kw)
+    def from_env(cls, **kw) -> TableApiSource:
+        url = os.environ.get("SN_INSTANCE_URL", "")
+        if not url:
+            raise SourceError("missing environment variable: SN_INSTANCE_URL")
+        kw.setdefault("allow_insecure_http", os.environ.get("SN_ALLOW_INSECURE_HTTP", "").lower() == "true")
+        return cls(url, os.environ.get("SN_USER", ""), os.environ.get("SN_PASSWORD", ""),
+                   os.environ.get("SN_TOKEN", ""), **kw)
+
+    def _get(self, url: str, params: dict):
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self.session.get(url, params=params, timeout=self.timeout)
+            except OSError as exc:  # requests' ConnectionError/Timeout subclass OSError
+                if attempt == self.max_retries:
+                    raise SourceError(f"cannot reach {self.base}: {exc.__class__.__name__}") from exc
+                self._sleep(self.backoff * 2 ** attempt)
+                continue
+            if resp.status_code not in RETRY_STATUS or attempt == self.max_retries:
+                return resp
+            retry_after = getattr(resp, "headers", {}).get("Retry-After")
+            wait = float(retry_after) if retry_after and str(retry_after).isdigit() else self.backoff * 2 ** attempt
+            log.warning("HTTP %s from %s; retry %d/%d in %.1fs", resp.status_code, url, attempt + 1,
+                        self.max_retries, wait)
+            self._sleep(wait)
+        return resp  # pragma: no cover
 
     def _get_all(self, table: str, fields: str, query: str = "") -> list[dict]:
         rows: list[dict] = []
@@ -68,9 +104,11 @@ class TableApiSource:
                       "sysparm_exclude_reference_link": "true", "sysparm_display_value": "false"}
             if query:
                 params["sysparm_query"] = query
-            resp = self.session.get(f"{self.base}/api/now/table/{table}", params=params, timeout=self.timeout)
+            resp = self._get(f"{self.base}/api/now/table/{table}", params)
             if resp.status_code == 401:
-                raise SourceError("authentication failed (401) - check SN_USER / SN_PASSWORD")
+                raise SourceError("authentication failed (401) - check credentials")
+            if resp.status_code == 403:
+                raise SourceError(f"{table}: access denied (403) - the user needs read access (e.g. cmdb_read)")
             if resp.status_code >= 400:
                 raise SourceError(f"{table}: HTTP {resp.status_code}")
             batch = resp.json().get("result", [])
