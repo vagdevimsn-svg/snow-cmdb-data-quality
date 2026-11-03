@@ -1,0 +1,22 @@
+# Live-mode demo without an instance: a mock Table API plus the checker.
+#   docker compose up --build --abort-on-container-exit --exit-code-from cmdb-dq
+services:
+  mock-servicenow:
+    build: .
+    entrypoint: ["cmdb-dq-mock"]
+    command: ["--host", "0.0.0.0", "--port", "8080", "--data", "sample_data/cmdb_export.json"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2)"]
+      interval: 2s
+      retries: 15
+  cmdb-dq:
+    build: .
+    depends_on:
+      mock-servicenow:
+        condition: service_healthy
+    environment:
+      SN_INSTANCE_URL: http://mock-servicenow:8080
+      SN_USER: demo
+      SN_PASSWORD: demo
+      SN_ALLOW_INSECURE_HTTP: "true"   # mock only; real instances must use https
+    command: ["--live", "--format", "md"]

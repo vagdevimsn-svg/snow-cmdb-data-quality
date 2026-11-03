@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snow-cmdb-data-quality"
+version = "1.1.0"
+description = "CSDM-style CMDB data-quality checks for ServiceNow (Table API or JSON export)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Vagdevi Meka" }]
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31"]
+keywords = ["servicenow", "cmdb", "csdm", "itom", "data-quality"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6"]
+
+[project.scripts]
+cmdb-dq = "cmdb_dq.__main__:main"
+cmdb-dq-mock = "cmdb_dq.mock_server:main"
+
+[tool.setuptools]
+packages = ["cmdb_dq"]
+
+[tool.setuptools.package-data]
+cmdb_dq = ["rules/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

@@ -1,5 +1,12 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+coverage.xml
+.ruff_cache/
+*.egg-info/
+build/
+dist/
 .env
 .venv/
+history.json
