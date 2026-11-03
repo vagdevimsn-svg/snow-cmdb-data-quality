@@ -1,0 +1,15 @@
+sys_id,ci_name,ci_class,check,severity,detail,remediation
+srv003,LNX-PAY-02,cmdb_ci_server,duplicate,high,duplicate on serial with: srv002,Review IRE identification rules; merge or retire the duplicate CI
+srv002,lnx-pay-02,cmdb_ci_server,duplicate,high,duplicate on serial with: srv003,Review IRE identification rules; merge or retire the duplicate CI
+svc002,Branch Reporting,cmdb_ci_service_auto,empty_service,high,application service has no downstream dependencies mapped,Run Service Mapping or build the service from tags/dynamic CI groups
+srv004,win-rpt-01,cmdb_ci_server,never_discovered,high,operational CI has no last_discovered date,Add the CI's IP range to a Discovery schedule or confirm it is manually managed
+srv005,win-old-09,cmdb_ci_server,retired_in_use,high,retired but still a dependency of ledger-batch,Remove the relationship or correct install_status
+svc002,Branch Reporting,cmdb_ci_service_auto,missing_field,medium,'owned_by' is empty,Populate owned_by (owner/support data drives assignment and impact)
+app002,ledger-batch,cmdb_ci_appl,missing_field,medium,'support_group' is empty,Populate support_group (owner/support data drives assignment and impact)
+srv004,win-rpt-01,cmdb_ci_server,missing_field,medium,'ip_address' is empty,Populate ip_address (owner/support data drives assignment and impact)
+svc002,Branch Reporting,cmdb_ci_service_auto,orphan,medium,no cmdb_rel_ci relationships,Map the CI with Service Mapping or add a Runs on / Depends on relationship
+srv003,LNX-PAY-02,cmdb_ci_server,orphan,medium,no cmdb_rel_ci relationships,Map the CI with Service Mapping or add a Runs on / Depends on relationship
+srv004,win-rpt-01,cmdb_ci_server,orphan,medium,no cmdb_rel_ci relationships,Map the CI with Service Mapping or add a Runs on / Depends on relationship
+svc002,Branch Reporting,cmdb_ci_service_auto,service_without_business_app,medium,no business application consumes this service,Link the service to its cmdb_ci_business_app (Consumes::Consumed by)
+srv002,lnx-pay-02,cmdb_ci_server,stale,medium,last discovered 125 days ago (> 30),"Check Discovery schedule, MID Server reachability and credentials; retire if decommissioned"
+rel5,,cmdb_rel_ci,dangling_relationship,low,child srv999 does not exist,Delete the relationship or restore the missing CI
