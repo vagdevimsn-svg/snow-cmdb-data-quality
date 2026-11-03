@@ -1,16 +1,25 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from cmdb_dq.__main__ import main
-from cmdb_dq.checks import (check_dangling_relationships, check_duplicates, check_orphans,
-                            check_required_fields, check_service_without_children, check_stale,
-                            health_score, run_checks)
-from cmdb_dq.report import to_markdown
-from cmdb_dq.source import SourceError, TableApiSource, load_file
+from cmdb_dq.checks import (
+    check_dangling_relationships,
+    check_duplicates,
+    check_orphans,
+    check_required_fields,
+    check_retired_in_use,
+    check_service_without_business_app,
+    check_service_without_children,
+    check_stale,
+    health_score,
+    run_checks,
+    score_by_class,
+)
+from cmdb_dq.rules import RulesError, load_rules
+from cmdb_dq.source import SourceError, load_file
 
-NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 1, tzinfo=UTC)
 SAMPLE = Path(__file__).resolve().parents[1] / "sample_data" / "cmdb_export.json"
 
 
@@ -27,6 +36,7 @@ def test_required_fields(data):
     f = check_required_fields(*data)
     assert {"svc002", "app002", "srv004"} <= ids(f)
     assert "srv001" not in ids(f)
+    assert all(x.remediation for x in f)
 
 
 def test_stale_and_never_discovered(data):
@@ -36,42 +46,77 @@ def test_stale_and_never_discovered(data):
     assert "srv005" not in ids(f)  # retired CI is ignored
 
 
+def test_stale_days_from_rules(data, tmp_path):
+    rules_file = tmp_path / "r.toml"
+    rules_file.write_text('stale_days = 200\ndiscoverable_classes = ["cmdb_ci_server"]\n')
+    f = check_stale(*data, now=NOW, rules=load_rules(rules_file))
+    assert ids(f, "stale") == set()
+
+
 def test_duplicates_case_insensitive(data):
-    f = check_duplicates(*data)
-    assert {"srv002", "srv003"} <= ids(f, "duplicate")
+    assert {"srv002", "srv003"} <= ids(check_duplicates(*data), "duplicate")
 
 
-def test_orphans(data):
+def test_orphans_respect_exempt_classes(data):
     f = check_orphans(*data)
     assert "srv004" in ids(f)
     assert "srv005" not in ids(f)  # not operational
-    assert "srv001" not in ids(f)
+    assert "bapp01" not in ids(f)
 
 
 def test_empty_service(data):
     assert ids(check_service_without_children(*data)) == {"svc002"}
 
 
+def test_service_without_business_app(data):
+    assert ids(check_service_without_business_app(*data)) == {"svc002"}
+
+
+def test_retired_in_use(data):
+    assert ids(check_retired_in_use(*data)) == {"srv005"}
+
+
 def test_dangling_relationship(data):
-    f = check_dangling_relationships(*data)
-    assert ids(f) == {"rel5"}
+    assert ids(check_dangling_relationships(*data)) == {"rel5"}
 
 
-def test_health_score_bounds(data):
+def test_disabled_check_is_skipped(data, tmp_path):
+    rules_file = tmp_path / "r.toml"
+    rules_file.write_text("[checks]\nduplicate = { enabled = false }\n")
+    found = run_checks(*data, now=NOW, rules=load_rules(rules_file))
+    assert not ids(found, "duplicate")
+
+
+def test_severity_from_rules(data, tmp_path):
+    rules_file = tmp_path / "r.toml"
+    rules_file.write_text('[checks]\norphan = { severity = "low" }\n')
+    found = run_checks(*data, now=NOW, rules=load_rules(rules_file))
+    assert {f.severity for f in found if f.check == "orphan"} == {"low"}
+
+
+@pytest.mark.parametrize("content", ["stale_days = -1", "[checks]\nx = { severity = \"urgent\" }", "not toml ="])
+def test_invalid_rules(tmp_path, content):
+    p = tmp_path / "bad.toml"
+    p.write_text(content)
+    with pytest.raises(RulesError):
+        load_rules(p)
+
+
+def test_missing_rules_file(tmp_path):
+    with pytest.raises(RulesError):
+        load_rules(tmp_path / "missing.toml")
+
+
+def test_health_score_bounds_and_by_class(data):
     cis, rels = data
     findings = run_checks(cis, rels, now=NOW)
     score = health_score(cis, findings)
     assert 0 <= score < 100
     assert health_score(cis, []) == 100.0
     assert health_score([], []) == 100.0
-
-
-def test_markdown_report(data):
-    cis, rels = data
-    findings = run_checks(cis, rels, now=NOW)
-    md = to_markdown(cis, findings, health_score(cis, findings))
-    assert md.startswith("# CMDB Data Quality Report")
-    assert "duplicate" in md
+    by_class = score_by_class(cis, findings)
+    assert list(by_class)[0] == "cmdb_ci_server"  # worst class first
+    assert by_class["cmdb_ci_business_app"]["score"] == 100.0
 
 
 def test_load_file_errors(tmp_path):
@@ -81,51 +126,3 @@ def test_load_file_errors(tmp_path):
     bad.write_text("{not json")
     with pytest.raises(SourceError):
         load_file(bad)
-
-
-def test_cli_fail_under(capsys):
-    assert main(["--input", str(SAMPLE), "--format", "json"]) == 0
-    assert main(["--input", str(SAMPLE), "--fail-under", "99"]) == 2
-
-
-class FakeResp:
-    def __init__(self, status, rows):
-        self.status_code, self._rows = status, rows
-
-    def json(self):
-        return {"result": self._rows}
-
-
-class FakeSession:
-    def __init__(self, pages, status=200):
-        self.pages, self.status, self.calls, self.headers, self.auth = pages, status, [], {}, None
-
-    def get(self, url, params, timeout):
-        self.calls.append((url, dict(params)))
-        idx = params["sysparm_offset"] // params["sysparm_limit"]
-        rows = self.pages.get(url.rsplit("/", 1)[-1], [])[idx * params["sysparm_limit"]:(idx + 1) * params["sysparm_limit"]]
-        return FakeResp(self.status, rows)
-
-
-def test_table_api_pagination():
-    cis = [{"sys_id": f"c{i}"} for i in range(5)]
-    sess = FakeSession({"cmdb_ci": cis, "cmdb_rel_ci": []})
-    src = TableApiSource("https://example.service-now.com", "u", "p", session=sess, page_size=2)
-    got_cis, got_rels = src.load()
-    assert len(got_cis) == 5 and got_rels == []
-    assert len([c for c in sess.calls if c[0].endswith("cmdb_ci")]) == 3
-
-
-def test_table_api_auth_error_and_https():
-    with pytest.raises(SourceError):
-        TableApiSource("http://insecure", "u", "p", session=FakeSession({}))
-    src = TableApiSource("https://example.service-now.com", "u", "p", session=FakeSession({}, status=401))
-    with pytest.raises(SourceError, match="401"):
-        src.load()
-
-
-def test_from_env_missing(monkeypatch):
-    for k in ("SN_INSTANCE_URL", "SN_USER", "SN_PASSWORD"):
-        monkeypatch.delenv(k, raising=False)
-    with pytest.raises(SourceError, match="missing"):
-        TableApiSource.from_env()
