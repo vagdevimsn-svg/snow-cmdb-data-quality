@@ -17,5 +17,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t cmdb-dq .
-      - run: docker run --rm cmdb-dq --format json > /dev/null
+      - run: docker run --rm cmdb-dq --input sample_data/cmdb_export.json --format json > /dev/null
       - run: docker compose up --build --abort-on-container-exit --exit-code-from cmdb-dq
