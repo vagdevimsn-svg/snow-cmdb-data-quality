@@ -1,6 +1,14 @@
 {
   "cmdb_ci": [
     {
+      "sys_id": "bapp01",
+      "name": "Digital Payments",
+      "sys_class_name": "cmdb_ci_business_app",
+      "install_status": "1",
+      "owned_by": "u_owner1",
+      "it_application_owner": "u_itown1"
+    },
+    {
       "sys_id": "svc001",
       "name": "Online Payments",
       "sys_class_name": "cmdb_ci_service_auto",
@@ -100,6 +108,12 @@
   ],
   "cmdb_rel_ci": [
     {
+      "sys_id": "rel0",
+      "parent": "bapp01",
+      "child": "svc001",
+      "type": "Consumes::Consumed by"
+    },
+    {
       "sys_id": "rel1",
       "parent": "svc001",
       "child": "app001",
@@ -127,6 +141,12 @@
       "sys_id": "rel5",
       "parent": "app002",
       "child": "srv999",
+      "type": "Runs on::Runs"
+    },
+    {
+      "sys_id": "rel6",
+      "parent": "app002",
+      "child": "srv005",
       "type": "Runs on::Runs"
     }
   ]
