@@ -1,0 +1,25 @@
+# Default CMDB data-quality rules. Copy this file and pass --rules my_rules.toml to tune
+# thresholds per organization. Severity: high | medium | low.
+
+stale_days = 30
+discoverable_classes = ["cmdb_ci_server", "cmdb_ci_linux_server", "cmdb_ci_win_server", "cmdb_ci_db_instance"]
+orphan_exempt_classes = ["cmdb_ci_business_app"]
+
+[checks]
+missing_field = { enabled = true, severity = "medium" }
+never_discovered = { enabled = true, severity = "high" }
+stale = { enabled = true, severity = "medium" }
+duplicate = { enabled = true, severity = "high" }
+orphan = { enabled = true, severity = "medium" }
+empty_service = { enabled = true, severity = "high" }
+service_without_business_app = { enabled = true, severity = "medium" }
+retired_in_use = { enabled = true, severity = "high" }
+dangling_relationship = { enabled = true, severity = "low" }
+
+# Fields each class must carry to be useful for Incident/Change impact analysis.
+[required_fields]
+cmdb_ci_server = ["name", "serial_number", "ip_address", "os", "support_group", "install_status"]
+cmdb_ci_appl = ["name", "owned_by", "support_group", "install_status"]
+cmdb_ci_service_auto = ["name", "owned_by", "support_group", "busines_criticality"]
+cmdb_ci_db_instance = ["name", "support_group", "install_status"]
+cmdb_ci_business_app = ["name", "owned_by", "it_application_owner"]
