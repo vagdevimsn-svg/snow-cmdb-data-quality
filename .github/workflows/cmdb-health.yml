@@ -1,0 +1,25 @@
+# Example of running the checker on a schedule. Against a real instance, store
+# SN_INSTANCE_URL / SN_USER / SN_PASSWORD as repository secrets and switch to --live.
+name: CMDB health report
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: |
+          mkdir -p out
+          cmdb-dq --input sample_data/cmdb_export.json --format html --output out/report.html
+          cmdb-dq --input sample_data/cmdb_export.json --format csv --output out/worklist.csv
+          cmdb-dq --input sample_data/cmdb_export.json --format md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmdb-health-report
+          path: out/
