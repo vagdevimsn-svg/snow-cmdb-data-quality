@@ -1,0 +1,21 @@
+name: Quality
+on: [push, pull_request]
+jobs:
+  lint-test-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q --cov=cmdb_dq --cov-report=term-missing --cov-fail-under=80
+      - run: cmdb-dq --version
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cmdb-dq .
+      - run: docker run --rm cmdb-dq --format json > /dev/null
+      - run: docker compose up --build --abort-on-container-exit --exit-code-from cmdb-dq
